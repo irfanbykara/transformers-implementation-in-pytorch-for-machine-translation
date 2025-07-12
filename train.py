@@ -18,7 +18,7 @@ class TransformerTrainer:
         for epoch in range(self.epochs):
             total_loss = 0
             for source, target in self.dataloader:
-                source, target = source.to(self.device), target.to(self.device)
+                source, target = source.to(self.device).long(), target.to(self.device).long()
 
                 target_input = target[:, :-1]
                 target_output = target[:, 1:]

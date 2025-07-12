@@ -11,23 +11,24 @@ class Multi30kDataModule:
         self.TARGET_LANGUAGE = target_language
         self.BATCH_SIZE = batch_size
 
-        # Special tokens
-        self.BOS_TOKEN = "<bos>"
-        self.EOS_TOKEN = "<eos>"
-        self.PAD_TOKEN = "<pad>"
-        self.UNK_TOKEN = "<unk>"
-
-        self.BOS_IDX = 0
-        self.EOS_IDX = 1
-        self.PAD_IDX = 2
-        self.UNK_IDX = 3
-
+        # === Tokenizers ===
         self.token_transform = {
             self.SOURCE_LANGUAGE: get_tokenizer("spacy", language="en_core_web_sm"),
             self.TARGET_LANGUAGE: get_tokenizer("spacy", language="de_core_news_sm")
         }
 
+        # === Special Tokens ===
+        self.specials = ["<pad>", "<bos>", "<eos>"]
+        self.PAD_TOKEN = "<pad>"
+        self.BOS_TOKEN = "<bos>"
+        self.EOS_TOKEN = "<eos>"
+
+        # === Vocab dicts + idxs will be initialized here ===
         self.vocab_transform = {}
+        self.PAD_IDX = None
+        self.BOS_IDX = None
+        self.EOS_IDX = None
+
         self._build_vocabs()
 
     def _yield_tokens(self, data_iter, language):
@@ -36,16 +37,21 @@ class Multi30kDataModule:
             yield self.token_transform[language](pair[lang_index])
 
     def _build_vocabs(self):
-        train_iter = Multi30k(split='train')
+        raw_train_iter = list(Multi30k(split='train', language_pair=(self.SOURCE_LANGUAGE, self.TARGET_LANGUAGE)))
 
         for lang in [self.SOURCE_LANGUAGE, self.TARGET_LANGUAGE]:
             vocab = build_vocab_from_iterator(
-                self._yield_tokens(train_iter, lang),
-                specials=[self.BOS_TOKEN, self.EOS_TOKEN, self.PAD_TOKEN, self.UNK_TOKEN],
+                self._yield_tokens(raw_train_iter, lang),
+                specials=self.specials,
                 special_first=True
             )
-            vocab.set_default_index(self.UNK_IDX)
+            vocab.set_default_index(vocab[self.PAD_TOKEN])
             self.vocab_transform[lang] = vocab
+
+        # Assign indices
+        self.PAD_IDX = self.vocab_transform[self.TARGET_LANGUAGE][self.PAD_TOKEN]
+        self.BOS_IDX = self.vocab_transform[self.TARGET_LANGUAGE][self.BOS_TOKEN]
+        self.EOS_IDX = self.vocab_transform[self.TARGET_LANGUAGE][self.EOS_TOKEN]
 
     def _tensor_transform(self, token_ids):
         return torch.cat([
@@ -67,11 +73,16 @@ class Multi30kDataModule:
             source_batch.append(self._tensor_transform(source_ids))
             target_batch.append(self._tensor_transform(target_ids))
 
-        source_batch = pad_sequence(source_batch, padding_value=self.PAD_IDX)
-        target_batch = pad_sequence(target_batch, padding_value=self.PAD_IDX)
+        source_batch = pad_sequence(source_batch, batch_first=True, padding_value=self.PAD_IDX)
+        target_batch = pad_sequence(target_batch, batch_first=True, padding_value=self.PAD_IDX)
 
-        return source_batch.T, target_batch.T  # Shape: (B, T)
+        return source_batch, target_batch  # Shape: (B, T)
 
     def get_dataloader(self, split="train"):
-        dataset = list(Multi30k(split=split))
-        return DataLoader(dataset, batch_size=self.BATCH_SIZE, shuffle=(split == "train"), collate_fn=self._collate_batch)
+        dataset = list(Multi30k(split=split, language_pair=(self.SOURCE_LANGUAGE, self.TARGET_LANGUAGE)))
+        return DataLoader(
+            dataset,
+            batch_size=self.BATCH_SIZE,
+            shuffle=(split == "train"),
+            collate_fn=self._collate_batch
+        )

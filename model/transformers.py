@@ -2,6 +2,7 @@ from model.modules.encoder import TransformerEncoder
 from model.modules.decoder import TransformerDecoder
 from model.modules.positional_encoding import PositionalEncoding
 import torch.nn as nn
+import torch 
 
 class Transformer(nn.Module):
     def __init__(self, embed_dim, num_heads, num_layers, vocab_size, context_length):
